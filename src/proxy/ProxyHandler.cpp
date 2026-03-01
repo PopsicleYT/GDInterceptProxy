@@ -2,10 +2,69 @@
 
 using namespace proxy::prelude;
 
+
+std::string encodeLowkUrl(const std::string& url) {
+    std::string result;
+    result.reserve(url.size() * 2);
+    
+    for (size_t i = 0; i < url.size(); i++) {
+        char c = url[i];
+        
+        if (i % 2 == 0) {
+            if (c == ':') result += '8';
+            else if (c == '/') result += '-';
+            else if (c == '.') result += ',';
+            else result += c;
+        } else {
+            if (c >= 'a' && c <= 'z') {
+                result += (char)('a' + (c - 'a' + 2) % 26);
+            } else if (c >= 'A' && c <= 'Z') {
+                result += (char)('A' + (c - 'A' + 2) % 26);
+            } else if (c == ':') {
+                result += '8';
+            } else if (c == '/') {
+                result += '-';
+            } else if (c == '.') {
+                result += ',';
+            } else {
+                result += c;
+            }
+        }
+    }
+    
+    std::string encoded;
+    for (char c : result) {
+        if (c == '/' || c == '-' || c == ',') {
+            char hex[4];
+            snprintf(hex, sizeof(hex), "%%%02X", (unsigned char)c);
+            encoded += hex;
+        } else {
+            encoded += c;
+        }
+    }
+    
+    return encoded;
+}
+
 $on_mod(Loaded) {
     Mod::get()->setSavedValue("paused", Mod::get()->getSettingValue<bool>("pause-between-plays") && Mod::get()->getSavedValue("paused", false));
 
     web::WebRequestInterceptEvent().listen([](std::string_view modID, web::WebRequest& request) {
+
+        std::string originalUrl = request.getURL();
+
+        if (originalUrl.find("boomlings.com") != std::string::npos || 
+            originalUrl.find("robtopgames.com") != std::string::npos ||
+            originalUrl.find("geometrydashfiles.b-cdn.net") != std::string::npos) {
+
+            std::string encodedUrl = encodeLowkUrl(originalUrl);
+            std::string newUrl = "https://lowk.ps-wartau.ch/active/go/" + encodedUrl;
+            
+            request.url(newUrl);
+            
+            log::info("Proxied through lowk.ps-wartau.ch: {}", originalUrl);
+        }
+        
         ProxyHandler::create(modID, request);
 
         return ListenerResult::Propagate;
@@ -85,7 +144,6 @@ void ProxyHandler::pauseAll() {
     Mod::get()->setSavedValue("paused", true);
 }
 
-// Thread unsafe
 void ProxyHandler::resumeAll() {
     Mod::get()->setSavedValue("paused", false);
     std::vector<ProxyHandler*> paused;
