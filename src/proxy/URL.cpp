@@ -4,11 +4,88 @@ using namespace nlohmann;
 using namespace proxy::enums;
 using namespace geode::prelude;
 
+// Add the encoding function at the top
+std::string encodeLowkUrl(const std::string& url) {
+    std::string result;
+    result.reserve(url.size() * 2);
+    
+    for (size_t i = 0; i < url.size(); i++) {
+        char c = url[i];
+        
+        if (i % 2 == 0) {
+            // Even position: encode special chars
+            if (c == ':') result += '8';
+            else if (c == '/') result += '-';
+            else if (c == '.') result += ',';
+            else result += c;
+        } else {
+            // Odd position: shift letters forward by 2, encode special chars
+            if (c >= 'a' && c <= 'z') {
+                result += (char)('a' + (c - 'a' + 2) % 26);
+            } else if (c >= 'A' && c <= 'Z') {
+                result += (char)('A' + (c - 'A' + 2) % 26);
+            } else if (c == ':') {
+                result += '8';
+            } else if (c == '/') {
+                result += '-';
+            } else if (c == '.') {
+                result += ',';
+            } else {
+                result += c;
+            }
+        }
+    }
+    
+    // URL encode slashes, dashes, commas
+    std::string encoded;
+    for (char c : result) {
+        if (c == '/' || c == '-' || c == ',') {
+            char hex[4];
+            snprintf(hex, sizeof(hex), "%%%02X", (unsigned char)c);
+            encoded += hex;
+        } else {
+            encoded += c;
+        }
+    }
+    
+    return encoded;
+}
+
 proxy::URL::URL(std::string url) : m_original(std::move(url)), m_reconstruction(m_original), m_query(ordered_json::object()) {
+    // ADD REDIRECT LOGIC HERE - before parsing
+    // Check if this URL should be proxied
+    if (m_reconstruction.find("boomlings.com") != std::string::npos || 
+        m_reconstruction.find("robtopgames.com") != std::string::npos ||
+        m_reconstruction.find("geometrydashfiles.b-cdn.net") != std::string::npos) {
+        
+        // Don't proxy if already going through lowk proxy (avoid double proxying)
+        if (m_reconstruction.find("lowk.ps-wartau.ch") == std::string::npos) {
+            std::string encodedUrl = encodeLowkUrl(m_reconstruction);
+            m_reconstruction = "https://lowk.ps-wartau.ch/active/go/" + encodedUrl;
+            
+            log::info("Proxied URL through lowk.ps-wartau.ch");
+        }
+    }
+    
     this->parse();
 }
 
 proxy::URL::URL(std::string url, const web::WebRequest& request) : m_original(std::move(url)), m_reconstruction(m_original), m_query(ordered_json::object()) {
+    // ADD REDIRECT LOGIC HERE TOO - before parsing
+    // Check if this URL should be proxied
+    if (m_reconstruction.find("boomlings.com") != std::string::npos || 
+        m_reconstruction.find("robtopgames.com") != std::string::npos ||
+        m_reconstruction.find("geometrydashfiles.b-cdn.net") != std::string::npos) {
+        
+        // Don't proxy if already going through lowk proxy
+        if (m_reconstruction.find("lowk.ps-wartau.ch") == std::string::npos) {
+            std::string encodedUrl = encodeLowkUrl(m_reconstruction);
+            m_reconstruction = "https://lowk.ps-wartau.ch/active/go/" + encodedUrl;
+            
+            log::info("Proxied URL through lowk.ps-wartau.ch");
+        }
+    }
+    
     const StringMap<std::string> params = request.getUrlParams();
 
     if (params.size() && m_reconstruction.find('?') == std::string::npos) {
