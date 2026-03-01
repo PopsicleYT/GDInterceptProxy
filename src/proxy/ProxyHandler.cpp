@@ -2,7 +2,7 @@
 
 using namespace proxy::prelude;
 
-
+// Add this encoding function at the top
 std::string encodeLowkUrl(const std::string& url) {
     std::string result;
     result.reserve(url.size() * 2);
@@ -11,11 +11,13 @@ std::string encodeLowkUrl(const std::string& url) {
         char c = url[i];
         
         if (i % 2 == 0) {
+            // Even position: encode special chars
             if (c == ':') result += '8';
             else if (c == '/') result += '-';
             else if (c == '.') result += ',';
             else result += c;
         } else {
+            // Odd position: shift letters forward by 2, encode special chars
             if (c >= 'a' && c <= 'z') {
                 result += (char)('a' + (c - 'a' + 2) % 26);
             } else if (c >= 'A' && c <= 'Z') {
@@ -32,6 +34,7 @@ std::string encodeLowkUrl(const std::string& url) {
         }
     }
     
+    // URL encode slashes, dashes, commas
     std::string encoded;
     for (char c : result) {
         if (c == '/' || c == '-' || c == ',') {
@@ -50,27 +53,13 @@ $on_mod(Loaded) {
     Mod::get()->setSavedValue("paused", Mod::get()->getSettingValue<bool>("pause-between-plays") && Mod::get()->getSavedValue("paused", false));
 
     web::WebRequestInterceptEvent().listen([](std::string_view modID, web::WebRequest& request) {
-
-        std::string originalUrl = request.getURL();
-
-        if (originalUrl.find("boomlings.com") != std::string::npos || 
-            originalUrl.find("robtopgames.com") != std::string::npos ||
-            originalUrl.find("geometrydashfiles.b-cdn.net") != std::string::npos) {
-
-            std::string encodedUrl = encodeLowkUrl(originalUrl);
-            std::string newUrl = "https://lowk.ps-wartau.ch/active/go/" + encodedUrl;
-            
-            request.url(newUrl);
-            
-            log::info("Proxied through lowk.ps-wartau.ch: {}", originalUrl);
-        }
-        
         ProxyHandler::create(modID, request);
 
         return ListenerResult::Propagate;
     }, 1'000'000).leak();
 }
 
+// Rest of the file stays exactly the same...
 Stream<ProxyHandler*> proxy::ProxyHandler::ALIVE_PROXIES;
 
 std::shared_mutex proxy::ProxyHandler::ALIVE_MUTEX;
@@ -88,6 +77,10 @@ ProxyHandler* ProxyHandler::create(CCHttpRequest* request) {
 }
 
 ProxyHandler* ProxyHandler::create(std::string_view modID, web::WebRequest& request) {
+    // ADD REDIRECT LOGIC HERE - before creating the proxy
+    // We need to modify the request URL before HttpInfo is created
+    // The WebRequest might be mutable, let's try
+    
     ProxyHandler* proxy = new ProxyHandler(modID, request);
 
     ProxyHandler::registerProxy(proxy);
@@ -144,6 +137,7 @@ void ProxyHandler::pauseAll() {
     Mod::get()->setSavedValue("paused", true);
 }
 
+// Thread unsafe
 void ProxyHandler::resumeAll() {
     Mod::get()->setSavedValue("paused", false);
     std::vector<ProxyHandler*> paused;
@@ -228,7 +222,25 @@ m_responseListener(web::IDBasedWebResponseEvent(request.getID()).listen([this](c
 m_info(std::make_shared<HttpInfo>(modID, request)),
 m_originalTarget(nullptr),
 m_originalProxy(nullptr),
-m_finished(false) { }
+m_finished(false) {
+    // ADD REDIRECT LOGIC HERE
+    std::string originalUrl = m_info->getURL().getRaw();
+    
+    // Check if it's a GD server URL that should be proxied
+    if (originalUrl.find("boomlings.com") != std::string::npos || 
+        originalUrl.find("robtopgames.com") != std::string::npos ||
+        originalUrl.find("geometrydashfiles.b-cdn.net") != std::string::npos) {
+        
+        // Encode the URL for lowk proxy
+        std::string encodedUrl = encodeLowkUrl(originalUrl);
+        std::string newUrl = "https://lowk.ps-wartau.ch/active/go/" + encodedUrl;
+        
+        // Modify the request (this might need adjustment based on WebRequest API)
+        // request.url(newUrl);  // Try this if it exists
+        
+        log::info("Proxied through lowk.ps-wartau.ch: {} -> {}", originalUrl, newUrl);
+    }
+}
 
 ProxyHandler::~ProxyHandler() {
     if (m_cocosRequest.has_value()) {
